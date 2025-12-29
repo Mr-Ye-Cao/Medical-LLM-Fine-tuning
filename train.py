@@ -72,21 +72,24 @@ def main(args):
         trainer.train()
 
     if not args.eval_only and not args.test:
+        import os
+        final_dir = os.path.join(args.output_dir, "final")
+
         if args.full_finetune:
-            # Full fine-tuning: save the entire model directly
-            trainer.save_model(args.output_dir)
-            tokenizer.save_pretrained(args.output_dir)
-            print(f"Full model saved to {args.output_dir}")
+            # Full fine-tuning: save the entire model to final/ subfolder
+            trainer.save_model(final_dir)
+            tokenizer.save_pretrained(final_dir)
+            print(f"Full model saved to {final_dir}")
         else:
-            # LoRA: save adapter and optionally merge
-            trainer.save_model(args.output_dir)
-            tokenizer.save_pretrained(args.output_dir)
-            print(f"LoRA adapter saved to {args.output_dir}")
+            # LoRA: save adapter to final/ subfolder
+            trainer.save_model(final_dir)
+            tokenizer.save_pretrained(final_dir)
+            print(f"LoRA adapter saved to {final_dir}")
 
             # Merge LoRA weights into base model
             try:
                 merged_model = trainer.model.merge_and_unload()
-                merged_dir = f"{args.output_dir}_merged"
+                merged_dir = os.path.join(args.output_dir, "merged")
                 merged_model.save_pretrained(merged_dir, safe_serialization=True)
                 tokenizer.save_pretrained(merged_dir)
                 print(f"Merged model saved to {merged_dir}")
