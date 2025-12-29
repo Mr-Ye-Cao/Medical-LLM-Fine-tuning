@@ -2,3 +2,6 @@ environment.yml
 requirements.txt
 sudo.md
 .DS_Store
+__pycache__
+checkpoint-*/
+train_olmo2.log
