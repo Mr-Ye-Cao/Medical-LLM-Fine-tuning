@@ -4,14 +4,8 @@ from transformers import TrainingArguments
 # TrainingArguments parameters
 ################################################################################
 
-# Output directory where the model predictions and checkpoints will be stored
-output_dir = "./med-qa-llama"
-
-# Number of training epochs
-num_train_epochs = 3
-
 # Batch size per GPU for training
-per_device_train_batch_size = 2
+per_device_train_batch_size = 4
 
 # Number of update steps to accumulate the gradients for
 gradient_accumulation_steps = 4
@@ -47,20 +41,30 @@ save_steps = 100
 # Log every X updates steps
 logging_steps = 20
 
-# Enable fp16/bf16 training (set bf16 to True with an A100)
-fp16 = True
-bf16 = False
+# Eval settings
+eval_strategy = "steps"
+eval_steps = 50
 
-# evaluation_strategy = "steps"
-# eval_steps = 20
 
-# Set training parameters
-def get_training_args(output_dir="./output", num_train_epochs=1):
-    return TrainingArguments(
+def get_training_args(output_dir="./output", num_train_epochs=3, use_deepspeed=False):
+    """
+    Get training arguments.
+
+    Args:
+        output_dir: Directory for checkpoints and outputs
+        num_train_epochs: Number of training epochs
+        use_deepspeed: Enable DeepSpeed ZeRO-3 (for large models like LLaMA-3-8B)
+
+    Returns:
+        TrainingArguments
+    """
+    args_dict = dict(
         output_dir=output_dir,
         num_train_epochs=num_train_epochs,
         per_device_train_batch_size=per_device_train_batch_size,
+        per_device_eval_batch_size=per_device_train_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        gradient_checkpointing=gradient_checkpointing,
         max_grad_norm=max_grad_norm,
         optim=optim,
         weight_decay=weight_decay,
@@ -70,11 +74,19 @@ def get_training_args(output_dir="./output", num_train_epochs=1):
         save_steps=save_steps,
         save_total_limit=3,
         logging_steps=logging_steps,
-        # evaluation_strategy=evaluation_strategy,
-        # eval_steps=eval_steps,
+        eval_strategy=eval_strategy,
+        eval_steps=eval_steps,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="tensorboard",
-        fp16=fp16,
-        bf16=bf16,
         group_by_length=group_by_length,
-        deepspeed="./configs/deepspeed_z3.json"
+        bf16=True,  # Use bfloat16 for modern GPUs
+        fp16=False,
     )
+
+    # Add DeepSpeed config for large models
+    if use_deepspeed:
+        args_dict["deepspeed"] = "./configs/deepspeed_z3.json"
+
+    return TrainingArguments(**args_dict)
