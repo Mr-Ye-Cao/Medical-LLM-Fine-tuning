@@ -35,17 +35,24 @@ def main(args):
         )
         return
 
-    # LoRA config
-    peft_config = get_peft_config()
+    # LoRA config (None for full fine-tuning)
+    if args.full_finetune:
+        peft_config = None
+        print("Mode: Full fine-tuning (all parameters trainable)")
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Trainable parameters: {trainable_params/1e6:.1f}M")
+    else:
+        peft_config = get_peft_config()
+        print("Mode: LoRA fine-tuning")
 
     # SFT config (uses new TRL API)
     sft_config = get_sft_config(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
-        use_deepspeed=(args.model_type == "llama3-8b")
+        use_deepspeed=(args.model_type == "llama3-8b" and not args.full_finetune)
     )
 
-    # Trainer (new TRL API - no separate data collator needed)
+    # Trainer
     trainer = SFTTrainer(
         model=model,
         train_dataset=dataset["train"],
@@ -65,20 +72,26 @@ def main(args):
         trainer.train()
 
     if not args.eval_only and not args.test:
-        # Save the LoRA adapter weights
-        trainer.save_model(args.output_dir)
-        tokenizer.save_pretrained(args.output_dir)
-        print(f"LoRA adapter saved to {args.output_dir}")
+        if args.full_finetune:
+            # Full fine-tuning: save the entire model directly
+            trainer.save_model(args.output_dir)
+            tokenizer.save_pretrained(args.output_dir)
+            print(f"Full model saved to {args.output_dir}")
+        else:
+            # LoRA: save adapter and optionally merge
+            trainer.save_model(args.output_dir)
+            tokenizer.save_pretrained(args.output_dir)
+            print(f"LoRA adapter saved to {args.output_dir}")
 
-        # Merge LoRA weights into base model
-        try:
-            merged_model = trainer.model.merge_and_unload()
-            merged_dir = f"{args.output_dir}_merged"
-            merged_model.save_pretrained(merged_dir, safe_serialization=True)
-            tokenizer.save_pretrained(merged_dir)
-            print(f"Merged model saved to {merged_dir}")
-        except Exception as e:
-            print(f"Could not merge model: {e}")
+            # Merge LoRA weights into base model
+            try:
+                merged_model = trainer.model.merge_and_unload()
+                merged_dir = f"{args.output_dir}_merged"
+                merged_model.save_pretrained(merged_dir, safe_serialization=True)
+                tokenizer.save_pretrained(merged_dir)
+                print(f"Merged model saved to {merged_dir}")
+            except Exception as e:
+                print(f"Could not merge model: {e}")
 
         # Optional: vLLM export (only for large models)
         if args.model_type == "llama3-8b" and args.export_vllm:
@@ -103,6 +116,10 @@ if __name__ == "__main__":
     parser.add_argument("--model_type", type=str, default="olmo2-1b",
                         choices=["olmo2-1b", "llama3-8b"],
                         help="Model type to use")
+
+    # Training method
+    parser.add_argument("--full_finetune", action="store_true",
+                        help="Full fine-tuning instead of LoRA (requires more GPU memory)")
 
     # Training parameters
     parser.add_argument("--epochs", type=int, default=3)
@@ -134,9 +151,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Set default output directory based on model type
+    # Set default output directory based on model type and training method
     if args.output_dir == "./results":
-        args.output_dir = f"./results/{args.model_type}_pubmedqa"
+        method = "full" if args.full_finetune else "lora"
+        args.output_dir = f"./results/{args.model_type}_pubmedqa_{method}"
 
     try:
         main(args)
