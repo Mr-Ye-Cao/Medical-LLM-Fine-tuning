@@ -1,12 +1,12 @@
 import torch
 import argparse
 from configs.lora_config import get_peft_config
-from configs.training_args import get_training_args
-from src.data_utils import load_and_process_data, get_response_template
+from configs.training_args import get_sft_config
+from src.data_utils import load_and_process_data
 from src.modeling import load_model_and_tokenizer
 from src.inference import interactive_test
 from src.eval import DualEvaluationCallback, comprehensive_evaluation
-from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
+from trl import SFTTrainer
 
 
 def main(args):
@@ -38,29 +38,21 @@ def main(args):
     # LoRA config
     peft_config = get_peft_config()
 
-    # Training args (conditionally use DeepSpeed for large models)
-    training_args = get_training_args(
+    # SFT config (uses new TRL API)
+    sft_config = get_sft_config(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
         use_deepspeed=(args.model_type == "llama3-8b")
     )
 
-    # Data collator with model-specific response template
-    response_template = get_response_template(args.model_type)
-    collator = DataCollatorForCompletionOnlyLM(
-        response_template=tokenizer.encode(response_template, add_special_tokens=False),
-        tokenizer=tokenizer,
-        mlm=False
-    )
-
-    # Trainer
+    # Trainer (new TRL API - no separate data collator needed)
     trainer = SFTTrainer(
         model=model,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
         peft_config=peft_config,
-        data_collator=collator,
-        args=training_args,
+        processing_class=tokenizer,
+        args=sft_config,
     )
     trainer.add_callback(DualEvaluationCallback(tokenizer, dataset["test"], args.model_type))
 
@@ -73,13 +65,20 @@ def main(args):
         trainer.train()
 
     if not args.eval_only and not args.test:
-        # Merge LoRA weights
-        model = model.merge_and_unload()
-
-        # Save HuggingFace format
-        model.save_pretrained(args.output_dir, safe_serialization=True)
+        # Save the LoRA adapter weights
+        trainer.save_model(args.output_dir)
         tokenizer.save_pretrained(args.output_dir)
-        print(f"Model saved to {args.output_dir}")
+        print(f"LoRA adapter saved to {args.output_dir}")
+
+        # Merge LoRA weights into base model
+        try:
+            merged_model = trainer.model.merge_and_unload()
+            merged_dir = f"{args.output_dir}_merged"
+            merged_model.save_pretrained(merged_dir, safe_serialization=True)
+            tokenizer.save_pretrained(merged_dir)
+            print(f"Merged model saved to {merged_dir}")
+        except Exception as e:
+            print(f"Could not merge model: {e}")
 
         # Optional: vLLM export (only for large models)
         if args.model_type == "llama3-8b" and args.export_vllm:

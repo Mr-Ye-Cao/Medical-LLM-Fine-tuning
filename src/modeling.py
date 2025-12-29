@@ -15,7 +15,7 @@ MODEL_CONFIGS = {
         "add_special_tokens": ["<|eot_id|>"],
     },
     "olmo2-1b": {
-        "name": "./OLMo-2-0425-1B",
+        "name": "../OLMo-2-0425-1B",  # Parent directory (relative to Medical-LLM-Fine-tuning)
         "use_quantization": False,  # Small enough to run in bfloat16
         "requires_hf_token": False,
         "add_special_tokens": [],

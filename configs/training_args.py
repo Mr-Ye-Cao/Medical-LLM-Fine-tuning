@@ -1,7 +1,7 @@
-from transformers import TrainingArguments
+from trl import SFTConfig
 
 ################################################################################
-# TrainingArguments parameters
+# SFTConfig parameters (new TRL API)
 ################################################################################
 
 # Batch size per GPU for training
@@ -45,10 +45,16 @@ logging_steps = 20
 eval_strategy = "steps"
 eval_steps = 50
 
+# Max sequence length
+max_length = 1024
 
-def get_training_args(output_dir="./output", num_train_epochs=3, use_deepspeed=False):
+# Dataset text field
+dataset_text_field = "text"
+
+
+def get_sft_config(output_dir="./output", num_train_epochs=3, use_deepspeed=False):
     """
-    Get training arguments.
+    Get SFT config (new TRL API).
 
     Args:
         output_dir: Directory for checkpoints and outputs
@@ -56,9 +62,9 @@ def get_training_args(output_dir="./output", num_train_epochs=3, use_deepspeed=F
         use_deepspeed: Enable DeepSpeed ZeRO-3 (for large models like LLaMA-3-8B)
 
     Returns:
-        TrainingArguments
+        SFTConfig
     """
-    args_dict = dict(
+    config_dict = dict(
         output_dir=output_dir,
         num_train_epochs=num_train_epochs,
         per_device_train_batch_size=per_device_train_batch_size,
@@ -79,14 +85,24 @@ def get_training_args(output_dir="./output", num_train_epochs=3, use_deepspeed=F
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        report_to="tensorboard",
+        report_to="none",  # Disable tensorboard for now
         group_by_length=group_by_length,
         bf16=True,  # Use bfloat16 for modern GPUs
         fp16=False,
+        # SFT-specific settings
+        max_length=max_length,
+        dataset_text_field=dataset_text_field,
+        packing=False,  # Disable packing for simplicity
     )
 
     # Add DeepSpeed config for large models
     if use_deepspeed:
-        args_dict["deepspeed"] = "./configs/deepspeed_z3.json"
+        config_dict["deepspeed"] = "./configs/deepspeed_z3.json"
 
-    return TrainingArguments(**args_dict)
+    return SFTConfig(**config_dict)
+
+
+# Keep old function for backwards compatibility
+def get_training_args(output_dir="./output", num_train_epochs=3, use_deepspeed=False):
+    """Deprecated: Use get_sft_config instead."""
+    return get_sft_config(output_dir, num_train_epochs, use_deepspeed)
