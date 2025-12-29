@@ -1,5 +1,12 @@
 from datasets import load_dataset
 
+# Available PubMedQA subsets
+SUBSETS = {
+    "pqa_labeled": {"size": 1000, "has_decision": True},
+    "pqa_artificial": {"size": 211269, "has_decision": True},
+    "pqa_unlabeled": {"size": 61249, "has_decision": False},
+}
+
 # Instruction templates for different models
 TEMPLATES = {
     "llama3-8b": {
@@ -34,13 +41,19 @@ def get_response_template(model_type="olmo2-1b"):
     return TEMPLATES[model_type]["response_template"]
 
 
-def load_and_process_data(dataset_name="qiaojin/PubMedQA", test_size=0.1, model_type="olmo2-1b"):
+def load_and_process_data(
+    dataset_name="qiaojin/PubMedQA",
+    subset="pqa_labeled",
+    test_size=0.2,
+    model_type="olmo2-1b"
+):
     """
     Load and process PubMedQA dataset.
 
     Args:
         dataset_name: HuggingFace dataset name
-        test_size: Fraction for test split
+        subset: One of "pqa_labeled", "pqa_artificial", "pqa_unlabeled"
+        test_size: Fraction for test split (default 0.2 = 80/20 split)
         model_type: One of "llama3-8b" or "olmo2-1b"
 
     Returns:
@@ -49,23 +62,36 @@ def load_and_process_data(dataset_name="qiaojin/PubMedQA", test_size=0.1, model_
     if model_type not in TEMPLATES:
         raise ValueError(f"Unknown model_type: {model_type}. Choose from {list(TEMPLATES.keys())}")
 
-    template = TEMPLATES[model_type]["format"]
+    if subset not in SUBSETS:
+        raise ValueError(f"Unknown subset: {subset}. Choose from {list(SUBSETS.keys())}")
 
-    dataset = load_dataset(dataset_name, "pqa_labeled")
+    template = TEMPLATES[model_type]["format"]
+    has_decision = SUBSETS[subset]["has_decision"]
+
+    print(f"Loading {subset} from {dataset_name}...")
+    dataset = load_dataset(dataset_name, subset)
     dataset = dataset["train"].train_test_split(test_size=test_size, seed=42)
 
     def format_instruction(example):
         context = ' '.join(example['context']['contexts'])
+
+        # Handle unlabeled data (no final_decision)
+        if has_decision:
+            answer = f"Final Decision: {example['final_decision']}\nLong Answer: {example['long_answer']}"
+        else:
+            answer = f"Long Answer: {example['long_answer']}"
+
         return {
             "text": template.format(
                 system_msg=SYSTEM_MSG,
                 context_msg=f"Context: {context}",
                 user_input=example['question'],
-                assistant_response=f"Final Decision: {example['final_decision']}\nLong Answer: {example['long_answer']}"
+                assistant_response=answer
             )
         }
 
     formatted = dataset.map(format_instruction)
     print(f"Dataset loaded: {len(formatted['train'])} train, {len(formatted['test'])} test")
+    print(f"Subset: {subset}, Has decision labels: {has_decision}")
 
     return formatted

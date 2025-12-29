@@ -20,7 +20,10 @@ def main(args):
         model, tokenizer = load_model_and_tokenizer(model_type=args.model_type)
 
     # Load and process data
-    dataset = load_and_process_data(model_type=args.model_type)
+    dataset = load_and_process_data(
+        subset=args.subset,
+        model_type=args.model_type
+    )
 
     if args.test:
         my_context = ' '.join(dataset["test"][args.input]['context']['contexts'])
@@ -120,6 +123,11 @@ if __name__ == "__main__":
                         choices=["olmo2-1b", "llama3-8b"],
                         help="Model type to use")
 
+    # Dataset selection
+    parser.add_argument("--subset", type=str, default="pqa_labeled",
+                        choices=["pqa_labeled", "pqa_artificial", "pqa_unlabeled"],
+                        help="PubMedQA subset to use")
+
     # Training method
     parser.add_argument("--full_finetune", action="store_true",
                         help="Full fine-tuning instead of LoRA (requires more GPU memory)")
@@ -154,10 +162,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Set default output directory based on model type and training method
+    # Set default output directory based on model type, subset, and training method
     if args.output_dir == "./results":
         method = "full" if args.full_finetune else "lora"
-        args.output_dir = f"./results/{args.model_type}_pubmedqa_{method}"
+        args.output_dir = f"./results/{args.model_type}_{args.subset}_{method}"
 
     try:
         main(args)

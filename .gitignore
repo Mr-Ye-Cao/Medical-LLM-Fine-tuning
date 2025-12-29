@@ -6,4 +6,5 @@ __pycache__
 checkpoint-*/
 train_olmo2.log
 train_full.log
-results/olmo2-1b_pubmedqa_full/final
+final/
+merged/
