@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     # Model selection
     parser.add_argument("--model_type", type=str, default="olmo2-1b",
-                        choices=["olmo2-1b", "llama3-8b"],
+                        choices=["olmo2-1b", "llama3-8b", "olmo3-7b-instruct"],
                         help="Model type to use")
 
     # Dataset selection

@@ -20,6 +20,12 @@ MODEL_CONFIGS = {
         "requires_hf_token": False,
         "add_special_tokens": [],
     },
+    "olmo3-7b-instruct": {
+        "name": "../OLMo-3-7B-Instruct",  # Parent directory (relative to Medical-LLM-Fine-tuning)
+        "use_quantization": False,  # GH200 has 100GB VRAM - no quantization needed for full fine-tuning
+        "requires_hf_token": False,
+        "add_special_tokens": [],  # ChatML tokens already in tokenizer
+    },
 }
 
 

@@ -26,6 +26,14 @@ TEMPLATES = {
         ),
         "response_template": "### Answer:\n",
     },
+    "olmo3-7b-instruct": {
+        "format": (
+            "<|im_start|>system\n{system_msg}\n{context_msg}<|im_end|>\n"
+            "<|im_start|>user\n{user_input}<|im_end|>\n"
+            "<|im_start|>assistant\n{assistant_response}<|im_end|>"
+        ),
+        "response_template": "<|im_start|>assistant\n",
+    },
 }
 
 SYSTEM_MSG = (

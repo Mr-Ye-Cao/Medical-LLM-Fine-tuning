@@ -1,74 +1,84 @@
 #!/usr/bin/env python3
 """
-Evaluate baseline model (no fine-tuning) on PubMedQA test set.
+Fast baseline evaluation using vLLM for batch inference.
+~10-20x faster than sequential transformers generation.
 """
 
-import torch
 import argparse
 import re
 import time
+from vllm import LLM, SamplingParams
 from src.data_utils import load_and_process_data, SUBSETS, get_response_template
-from src.modeling import load_model_and_tokenizer
 from sklearn.metrics import accuracy_score, f1_score, classification_report
 from rouge import Rouge
 
 
-def evaluate_baseline(model, tokenizer, test_dataset, has_decision=True, model_type="olmo2-1b"):
-    """Run evaluation on test set."""
-    model.eval()
-    predictions = {"decisions": [], "answers": []}
+def evaluate_with_vllm(model_path, test_dataset, model_type, has_decision=True):
+    """Run evaluation using vLLM for fast batch inference."""
+
+    response_template = get_response_template(model_type)
+    print(f"Response template: {repr(response_template)}")
+
+    # Prepare prompts
+    prompts = []
     ground_truth = {"decisions": [], "answers": []}
 
-    # Get the response template for this model
-    response_template = get_response_template(model_type)
-
-    print(f"\nEvaluating on {len(test_dataset)} samples...")
-    print(f"Response template: {repr(response_template)}")
-    start_time = time.time()
-
-    for i, example in enumerate(test_dataset):
-        # Get the prompt (everything before the response template)
+    for example in test_dataset:
         text = example["text"]
         prompt = text.split(response_template)[0] + response_template
+        prompts.append(prompt)
 
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1024)
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        if has_decision:
+            ground_truth["decisions"].append(example.get("final_decision", "").lower())
+        ground_truth["answers"].append(example.get("long_answer", ""))
 
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=200,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                do_sample=False
-            )
+    print(f"\nPrepared {len(prompts)} prompts for batch inference...")
 
-        generated = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    # Initialize vLLM
+    print(f"Loading model with vLLM: {model_path}")
+    llm = LLM(
+        model=model_path,
+        dtype="bfloat16",
+        trust_remote_code=True,
+        max_model_len=2048,
+    )
 
-        # Extract prediction
+    # Sampling parameters
+    sampling_params = SamplingParams(
+        temperature=0.0,  # Greedy decoding
+        max_tokens=200,
+        stop=["<|im_end|>", "<|endoftext|>"],
+    )
+
+    # Batch generation
+    print("Running batch inference...")
+    start_time = time.time()
+    outputs = llm.generate(prompts, sampling_params)
+    elapsed = time.time() - start_time
+
+    print(f"Batch inference completed in {elapsed:.1f}s ({len(prompts)/elapsed:.1f} samples/sec)")
+
+    # Process outputs
+    predictions = {"decisions": [], "answers": []}
+
+    for output in outputs:
+        generated = output.outputs[0].text.strip()
+
+        # Extract decision
         if has_decision:
             match = re.search(r'Final Decision:\s*(\w+)', generated, re.I)
             pred_decision = match.group(1).lower() if match else "maybe"
             predictions["decisions"].append(pred_decision)
-            ground_truth["decisions"].append(example.get("final_decision", "").lower())
 
         # Extract answer
         if "Long Answer:" in generated:
             pred_answer = generated.split("Long Answer:")[-1].strip()
-        elif response_template in generated:
-            pred_answer = generated.split(response_template)[-1].strip()
         else:
-            pred_answer = ""
+            pred_answer = generated
         predictions["answers"].append(pred_answer)
-        ground_truth["answers"].append(example.get("long_answer", ""))
-
-        if (i + 1) % 20 == 0:
-            print(f"  Processed {i+1}/{len(test_dataset)}")
-
-    elapsed = time.time() - start_time
-    print(f"Evaluation completed in {elapsed:.1f}s ({len(test_dataset)/elapsed:.1f} samples/sec)")
 
     # Classification metrics
+    results = {}
     if has_decision and predictions["decisions"]:
         print("\n=== Classification Metrics ===")
         acc = accuracy_score(ground_truth["decisions"], predictions["decisions"])
@@ -77,6 +87,8 @@ def evaluate_baseline(model, tokenizer, test_dataset, has_decision=True, model_t
         print(f"Macro F1: {f1:.4f}")
         print("\nClassification Report:")
         print(classification_report(ground_truth["decisions"], predictions["decisions"], zero_division=0))
+        results["accuracy"] = acc
+        results["f1"] = f1
 
     # Generation metrics
     print("\n=== Generation Metrics ===")
@@ -90,49 +102,56 @@ def evaluate_baseline(model, tokenizer, test_dataset, has_decision=True, model_t
         rouge = Rouge().get_scores(list(pred_valid), list(true_valid), avg=True)
         print(f"ROUGE-L F1: {rouge['rouge-l']['f']:.4f}")
         print(f"Valid predictions: {len(valid_pairs)}/{len(predictions['answers'])}")
+        results["rouge_l"] = rouge['rouge-l']['f']
     else:
         print("No valid predictions for ROUGE score")
+        results["rouge_l"] = None
 
-    return {
-        "accuracy": acc if has_decision else None,
-        "f1": f1 if has_decision else None,
-        "rouge_l": rouge['rouge-l']['f'] if valid_pairs else None
-    }
+    return results
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate baseline model on PubMedQA")
-    parser.add_argument("--model_type", type=str, default="olmo2-1b",
+    parser = argparse.ArgumentParser(description="Fast baseline evaluation using vLLM")
+    parser.add_argument("--model_type", type=str, default="olmo3-7b-instruct",
                         choices=["olmo2-1b", "llama3-8b", "olmo3-7b-instruct"])
+    parser.add_argument("--model_path", type=str, default=None,
+                        help="Custom model path (e.g., fine-tuned checkpoint)")
     parser.add_argument("--subset", type=str, default="pqa_labeled",
                         choices=["pqa_labeled", "pqa_artificial", "pqa_unlabeled"])
     args = parser.parse_args()
 
-    print(f"=== Baseline Evaluation ===")
+    # Default model paths
+    MODEL_PATHS = {
+        "olmo2-1b": "../OLMo-2-0425-1B",
+        "olmo3-7b-instruct": "../OLMo-3-7B-Instruct",
+        "llama3-8b": "meta-llama/Meta-Llama-3-8B",
+    }
+
+    model_path = args.model_path or MODEL_PATHS.get(args.model_type)
+
+    print(f"=== vLLM Baseline Evaluation ===")
     print(f"Model: {args.model_type}")
+    print(f"Model path: {model_path}")
     print(f"Subset: {args.subset}")
 
-    # Load model
-    model, tokenizer = load_model_and_tokenizer(model_type=args.model_type)
-
-    # Load data (80/20 split)
+    # Load data
     dataset = load_and_process_data(
         subset=args.subset,
         model_type=args.model_type
     )
 
-    # Evaluate on test set
+    # Evaluate
     has_decision = SUBSETS[args.subset]["has_decision"]
-    results = evaluate_baseline(model, tokenizer, dataset["test"], has_decision, args.model_type)
+    results = evaluate_with_vllm(model_path, dataset["test"], args.model_type, has_decision)
 
     print("\n=== Summary ===")
-    print(f"Model: {args.model_type} (baseline, no fine-tuning)")
+    print(f"Model: {args.model_type}")
     print(f"Dataset: {args.subset}")
     print(f"Test samples: {len(dataset['test'])}")
-    if results["accuracy"] is not None:
+    if results.get("accuracy") is not None:
         print(f"Accuracy: {results['accuracy']:.4f}")
         print(f"Macro F1: {results['f1']:.4f}")
-    if results["rouge_l"] is not None:
+    if results.get("rouge_l") is not None:
         print(f"ROUGE-L: {results['rouge_l']:.4f}")
 
 
