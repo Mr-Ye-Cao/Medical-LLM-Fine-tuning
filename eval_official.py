@@ -29,6 +29,8 @@ def evaluate_official(model_path, test_dataset, model_type):
     prompts = []
     pmids = []
     ground_truth = []
+    questions = []
+    contexts = []
 
     for example in test_dataset:
         pmid = str(example['pubid'])
@@ -40,6 +42,8 @@ def evaluate_official(model_path, test_dataset, model_type):
         prompts.append(prompt)
         pmids.append(pmid)
         ground_truth.append(official_gt[pmid])
+        questions.append(example['question'])
+        contexts.append(' '.join(example['context']['contexts']))
 
     print(f"\nPrepared {len(prompts)} prompts for batch inference...")
 
@@ -68,7 +72,8 @@ def evaluate_official(model_path, test_dataset, model_type):
     print(f"Batch inference completed in {elapsed:.1f}s ({len(prompts)/elapsed:.1f} samples/sec)")
 
     # Process outputs
-    predictions = {}
+    predictions = {}  # For official eval format: {pmid: "yes"/"no"/"maybe"}
+    full_outputs = {}  # Full outputs with reasoning: {pmid: {decision, reasoning, full_text}}
     pred_list = []
 
     for i, output in enumerate(outputs):
@@ -88,7 +93,22 @@ def evaluate_official(model_path, test_dataset, model_type):
             else:
                 pred = 'maybe'
 
+        # Extract long answer/reasoning if present
+        reasoning_match = re.search(r'Long Answer:\s*(.+)', generated, re.I | re.DOTALL)
+        reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
+
         predictions[pmids[i]] = pred
+        full_outputs[pmids[i]] = {
+            "pmid": pmids[i],
+            "question": questions[i],
+            "context": contexts[i],
+            "input_prompt": prompts[i],
+            "model_output": generated,
+            "decision": pred,
+            "reasoning": reasoning,
+            "ground_truth": ground_truth[i],
+            "correct": pred == ground_truth[i]
+        }
         pred_list.append(pred)
 
     # Calculate metrics
@@ -112,6 +132,7 @@ def evaluate_official(model_path, test_dataset, model_type):
         "accuracy": acc,
         "macro_f1": maf,
         "predictions": predictions,
+        "full_outputs": full_outputs,
     }
 
 
@@ -156,9 +177,16 @@ def main():
 
     # Save predictions if requested
     if args.output_file:
+        # Save official format (just decisions) for official eval script
         with open(args.output_file, 'w') as f:
             json.dump(results['predictions'], f, indent=2)
         print(f"\nPredictions saved to: {args.output_file}")
+
+        # Save full outputs with reasoning
+        full_output_file = args.output_file.replace('.json', '_full.json')
+        with open(full_output_file, 'w') as f:
+            json.dump(results['full_outputs'], f, indent=2)
+        print(f"Full outputs (with reasoning) saved to: {full_output_file}")
 
 
 if __name__ == "__main__":
