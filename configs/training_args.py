@@ -52,7 +52,8 @@ max_length = 1024
 dataset_text_field = "text"
 
 
-def get_sft_config(output_dir="./output", num_train_epochs=3, use_deepspeed=False):
+def get_sft_config(output_dir="./output", num_train_epochs=3, use_deepspeed=False,
+                   save_all_checkpoints=False, save_every_epoch=False):
     """
     Get SFT config (new TRL API).
 
@@ -60,6 +61,8 @@ def get_sft_config(output_dir="./output", num_train_epochs=3, use_deepspeed=Fals
         output_dir: Directory for checkpoints and outputs
         num_train_epochs: Number of training epochs
         use_deepspeed: Enable DeepSpeed ZeRO-3 (for large models like LLaMA-3-8B)
+        save_all_checkpoints: If True, save all checkpoints (no limit)
+        save_every_epoch: If True, save checkpoint at each epoch end
 
     Returns:
         SFTConfig
@@ -78,7 +81,7 @@ def get_sft_config(output_dir="./output", num_train_epochs=3, use_deepspeed=Fals
         lr_scheduler_type=lr_scheduler_type,
         warmup_ratio=warmup_ratio,
         save_steps=save_steps,
-        save_total_limit=3,
+        save_total_limit=None if save_all_checkpoints else 3,
         logging_steps=logging_steps,
         eval_strategy=eval_strategy,
         eval_steps=eval_steps,
@@ -94,6 +97,13 @@ def get_sft_config(output_dir="./output", num_train_epochs=3, use_deepspeed=Fals
         dataset_text_field=dataset_text_field,
         packing=False,  # Disable packing for simplicity
     )
+
+    # Save at each epoch end
+    if save_every_epoch:
+        config_dict["save_strategy"] = "epoch"
+        config_dict["eval_strategy"] = "epoch"
+        del config_dict["save_steps"]
+        del config_dict["eval_steps"]
 
     # Add DeepSpeed config for large models
     if use_deepspeed:

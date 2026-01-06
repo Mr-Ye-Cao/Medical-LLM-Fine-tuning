@@ -22,7 +22,8 @@ def main(args):
     # Load and process data
     dataset = load_and_process_data(
         subset=args.subset,
-        model_type=args.model_type
+        model_type=args.model_type,
+        use_official_split=args.official_split
     )
 
     if args.test:
@@ -52,7 +53,9 @@ def main(args):
     sft_config = get_sft_config(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
-        use_deepspeed=(args.model_type == "llama3-8b" and not args.full_finetune)
+        use_deepspeed=(args.model_type == "llama3-8b" and not args.full_finetune),
+        save_all_checkpoints=args.save_all_checkpoints,
+        save_every_epoch=args.save_every_epoch
     )
 
     # Trainer
@@ -127,6 +130,8 @@ if __name__ == "__main__":
     parser.add_argument("--subset", type=str, default="pqa_labeled",
                         choices=["pqa_labeled", "pqa_artificial", "pqa_unlabeled"],
                         help="PubMedQA subset to use")
+    parser.add_argument("--official_split", action="store_true",
+                        help="Use official PubMedQA 500/500 train/test split")
 
     # Training method
     parser.add_argument("--full_finetune", action="store_true",
@@ -137,6 +142,10 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="./results")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None,
                         help="Path to checkpoint directory")
+    parser.add_argument("--save_all_checkpoints", action="store_true",
+                        help="Save all checkpoints (no limit)")
+    parser.add_argument("--save_every_epoch", action="store_true",
+                        help="Save checkpoint at each epoch end")
 
     # Evaluation
     parser.add_argument("--eval_only", action="store_true",

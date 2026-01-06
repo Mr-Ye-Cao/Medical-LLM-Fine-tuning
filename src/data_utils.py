@@ -1,4 +1,6 @@
-from datasets import load_dataset
+import json
+import os
+from datasets import load_dataset, Dataset
 
 # Available PubMedQA subsets
 SUBSETS = {
@@ -6,6 +8,9 @@ SUBSETS = {
     "pqa_artificial": {"size": 211269, "has_decision": True},
     "pqa_unlabeled": {"size": 61249, "has_decision": False},
 }
+
+# Path to official PubMedQA test ground truth
+OFFICIAL_TEST_PATH = os.path.join(os.path.dirname(__file__), "../../pubmedqa/data/test_ground_truth.json")
 
 # Instruction templates for different models
 TEMPLATES = {
@@ -53,7 +58,8 @@ def load_and_process_data(
     dataset_name="qiaojin/PubMedQA",
     subset="pqa_labeled",
     test_size=0.2,
-    model_type="olmo2-1b"
+    model_type="olmo2-1b",
+    use_official_split=False
 ):
     """
     Load and process PubMedQA dataset.
@@ -63,6 +69,7 @@ def load_and_process_data(
         subset: One of "pqa_labeled", "pqa_artificial", "pqa_unlabeled"
         test_size: Fraction for test split (default 0.2 = 80/20 split)
         model_type: One of "llama3-8b" or "olmo2-1b"
+        use_official_split: If True, use official PubMedQA 500/500 train/test split
 
     Returns:
         Processed dataset with train/test splits
@@ -77,8 +84,34 @@ def load_and_process_data(
     has_decision = SUBSETS[subset]["has_decision"]
 
     print(f"Loading {subset} from {dataset_name}...")
-    dataset = load_dataset(dataset_name, subset)
-    dataset = dataset["train"].train_test_split(test_size=test_size, seed=42)
+    full_dataset = load_dataset(dataset_name, subset)["train"]
+
+    if use_official_split and subset == "pqa_labeled":
+        # Use official PubMedQA test split (500 train / 500 test)
+        if not os.path.exists(OFFICIAL_TEST_PATH):
+            raise FileNotFoundError(f"Official test ground truth not found: {OFFICIAL_TEST_PATH}")
+
+        with open(OFFICIAL_TEST_PATH) as f:
+            test_ground_truth = json.load(f)
+        test_pmids = set(test_ground_truth.keys())
+
+        # Split by PMID
+        train_examples = []
+        test_examples = []
+        for ex in full_dataset:
+            if str(ex['pubid']) in test_pmids:
+                test_examples.append(ex)
+            else:
+                train_examples.append(ex)
+
+        from datasets import DatasetDict
+        dataset = DatasetDict({
+            "train": Dataset.from_list(train_examples),
+            "test": Dataset.from_list(test_examples)
+        })
+        print(f"Using official PubMedQA split: {len(train_examples)} train, {len(test_examples)} test")
+    else:
+        dataset = full_dataset.train_test_split(test_size=test_size, seed=42)
 
     def format_instruction(example):
         context = ' '.join(example['context']['contexts'])
