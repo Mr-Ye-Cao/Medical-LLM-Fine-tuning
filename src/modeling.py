@@ -35,7 +35,7 @@ def load_model_and_tokenizer(model_type="olmo2-1b", model_path=None):
 
     Args:
         model_type: One of "llama3-8b" or "olmo2-1b"
-        model_path: Override default model path (e.g., checkpoint path)
+        model_path: Override default model path (e.g., checkpoint path for loading fine-tuned weights)
 
     Returns:
         model, tokenizer
@@ -44,7 +44,12 @@ def load_model_and_tokenizer(model_type="olmo2-1b", model_path=None):
         raise ValueError(f"Unknown model_type: {model_type}. Choose from {list(MODEL_CONFIGS.keys())}")
 
     config = MODEL_CONFIGS[model_type]
-    model_name = model_path or config["name"]
+
+    # If model_path is provided, use it; otherwise use default
+    if model_path and os.path.isdir(model_path):
+        model_name = model_path
+    else:
+        model_name = config["name"]
 
     # HuggingFace login if required
     if config["requires_hf_token"]:

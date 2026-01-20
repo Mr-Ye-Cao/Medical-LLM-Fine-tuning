@@ -11,7 +11,9 @@ from trl import SFTTrainer
 
 def main(args):
     # Load model and tokenizer
+    # If resume_from_checkpoint is provided, load weights from there (fresh optimizer)
     if args.resume_from_checkpoint:
+        print(f"Loading model weights from checkpoint: {args.resume_from_checkpoint}")
         model, tokenizer = load_model_and_tokenizer(
             model_type=args.model_type,
             model_path=args.resume_from_checkpoint
@@ -72,9 +74,9 @@ def main(args):
     if args.eval_only:
         trainer.evaluate()
         comprehensive_evaluation(trainer.model, tokenizer, dataset["test"], args.model_type)
-    elif args.resume_from_checkpoint:
-        trainer.train(resume_from_checkpoint=True)
     else:
+        # Note: When resume_from_checkpoint is used, we load weights directly (fresh optimizer)
+        # This avoids OOM from loading the large optimizer state
         trainer.train()
 
     if not args.eval_only and not args.test:
